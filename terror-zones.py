@@ -66,6 +66,11 @@ STATE_FILE = Path(os.environ.get("TZ_STATE_FILE", HERE / "seen_tz.json"))
 # la TUYA, no la del servidor que corre el script.
 DISPLAY_TZ = os.environ.get("TZ_DISPLAY_TZ", "America/Santiago")
 
+# Minuto de la hora en que rotan las Terror Zones. Observado en 30, no en 0:
+# con el valor equivocado TODOS los avisos de "proxima" salen corridos una
+# hora entera, asi que es configurable en vez de estar hardcodeado.
+ROTATION_MINUTE = int(os.environ.get("TZ_ROTATION_MINUTE", "30")) % 60
+
 # Cabeceras de cortesia que pide su documentacion. Vacias por defecto: pon tu
 # correo en el .env si quieres identificarte (la API funciona igual sin ellas).
 HEADERS = {"accept": "application/json"}
@@ -133,12 +138,16 @@ def _tzinfo():
 TZINFO = _tzinfo()
 
 
-def next_hour_local() -> str:
-    """Las TZ rotan en punto, asi que la siguiente arranca a la hora siguiente."""
+def next_rotation() -> str:
+    """Proxima rotacion, que es a la vez el fin de la zona actual y el
+    arranque de la siguiente. Es el mismo instante, asi que un solo calculo
+    sirve para los dos avisos.
+    """
     ahora = datetime.now(TZINFO) if TZINFO else datetime.now().astimezone()
-    return (ahora.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)).strftime(
-        "%H:%M"
-    )
+    borde = ahora.replace(minute=ROTATION_MINUTE, second=0, microsecond=0)
+    if borde <= ahora:
+        borde += timedelta(hours=1)
+    return borde.strftime("%H:%M")
 
 
 # --- Estado ------------------------------------------------------------------
@@ -193,17 +202,18 @@ def fetch_tz():
 
 
 def announce(zone: str, hits: list, cuando: str) -> bool:
+    borde = next_rotation()
     if cuando == "actual":
         msg = tn.Message(
             f"🔥 Terror Zone activa: {zone}",
-            body="Ya esta corriendo, tienes hasta la hora en punto.",
+            body=f"Ya esta corriendo, la tienes hasta las {borde}.",
             fields=[("Coincide con", ", ".join(hits))],
             url="https://d2runewizard.com/terror-zone-tracker",
         )
     else:
         msg = tn.Message(
             f"⏳ Proxima Terror Zone: {zone}",
-            body=f"Arranca a las {next_hour_local()}.",
+            body=f"Arranca a las {borde}.",
             fields=[("Coincide con", ", ".join(hits))],
             url="https://d2runewizard.com/terror-zone-tracker",
         )
