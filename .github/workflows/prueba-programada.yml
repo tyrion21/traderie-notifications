@@ -1,15 +1,21 @@
 name: Prueba programada
 
 # Manda un mensaje de prueba a Telegram para confirmar que todo funciona con
-# el PC apagado. El cron lleva dia y mes fijos (31 de agosto, 16:11 UTC =
-# 12:11 en Chile), asi que dispara una sola vez y no vuelve a molestar.
+# el PC apagado. El cron lleva dia y mes fijos (31 de agosto), asi que dispara
+# solo hoy y no vuelve a molestar.
+#
+# OJO con el margen: el intento anterior se programo 7 minutos despues del push
+# y no disparo. GitHub tarda en registrar el cron de un repo recien creado, y
+# ademas el scheduler es "best effort" (5-20 min de atraso es normal, y bajo
+# carga se salta ticks). Por eso ahora van dos intentos con una hora de margen:
+# 17:20 y 17:50 UTC = 13:20 y 13:50 en Chile.
 #
 # Cuando te llegue el mensaje, este archivo ya cumplio: puedes borrarlo.
 # El watcher de verdad es traderie.yml, que corre cada 5 minutos.
 
 on:
   schedule:
-    - cron: "11 16 31 8 *"
+    - cron: "20,50 17 31 8 *"
   workflow_dispatch:
 
 permissions:
