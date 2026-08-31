@@ -1,0 +1,38 @@
+name: Prueba programada
+
+# Manda un mensaje de prueba a Telegram para confirmar que todo funciona con
+# el PC apagado. El cron lleva dia y mes fijos (31 de agosto, 16:31 UTC), asi
+# que dispara una sola vez y no vuelve a molestar.
+#
+# Cuando te llegue el mensaje, este archivo ya cumplio: puedes borrarlo.
+# El watcher de verdad es traderie.yml, que corre cada 5 minutos.
+
+on:
+  schedule:
+    - cron: "31 16 31 8 *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # --test no toca la API de Traderie: solo prueba la entrega al celular.
+      - run: python traderie-notifications.py --test
+        env:
+          TRADERIE_AUTH: ${{ secrets.TRADERIE_AUTH }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NOTIFY_CHANNELS: telegram
