@@ -1,5 +1,9 @@
 name: Watcher continuo
 
+# Corre dos vigilantes en paralelo dentro del mismo job:
+#   - traderie-notifications.py -> ofertas aceptadas/entrantes en Traderie
+#   - terror-zones.py           -> Terror Zones de D2R que te interesan
+#
 # Alternativa al cron de GitHub, que en esta repo nunca arrancó: cero corridas
 # programadas en su primera hora de vida, teniendo un */5 configurado. En vez
 # de depender del scheduler, esto corre UN job largo que hace polling cada 60s
@@ -44,7 +48,9 @@ jobs:
       # COLD_START_HOURS=2 tapa cualquier pérdida sin spamear el historial.
       - uses: actions/cache@v4
         with:
-          path: seen_offers.json
+          path: |
+            seen_offers.json
+            seen_tz.json
           key: traderie-state-${{ github.run_id }}
           restore-keys: |
             traderie-state-
@@ -57,7 +63,15 @@ jobs:
         id: watch
         run: |
           echo "inicio=$(date +%s)" >> "$GITHUB_OUTPUT"
-          timeout 20700 python traderie-notifications.py || true
+          # Los dos watchers corren en paralelo en el mismo job: ofertas de
+          # Traderie y Terror Zones. Cada uno con su propio timeout, y el
+          # `|| true` final evita que el kill marque el job como fallido y se
+          # salte el relanzamiento.
+          timeout 20700 python traderie-notifications.py &
+          ofertas=$!
+          timeout 20700 python terror-zones.py &
+          tzones=$!
+          wait $ofertas $tzones || true
         env:
           TRADERIE_AUTH: ${{ secrets.TRADERIE_AUTH }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
@@ -72,6 +86,9 @@ jobs:
           # a restaurar estado viejo reenviaria como maximo 15 min de
           # historial en vez de 2 horas.
           COLD_START_HOURS: "0.25"
+          # Las zonas vigiladas viven en TZ_WATCH_DEFAULT, dentro de
+          # terror-zones.py. Para cambiarlas edita esa lista (o define TZ_WATCH
+          # aca si prefieres tenerlas a la vista en el workflow).
 
       # Si el job murió en menos de 5 minutos algo está roto de verdad
       # (token vencido, dependencias, API caída). Relanzar ahí sería un crash

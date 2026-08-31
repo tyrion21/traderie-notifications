@@ -1,9 +1,11 @@
 # NUNCA subir: tiene el token de tu sesión de Traderie y el del bot.
 .env
 
-# Estado local del watcher.
+# Estado local de los watchers.
 seen_offers.json
 seen_offers.json.tmp
+seen_tz.json
+seen_tz.json.tmp
 
 __pycache__/
 *.pyc
