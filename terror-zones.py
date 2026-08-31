@@ -62,6 +62,10 @@ TZ_EXCLUDE_DEFAULT = "Pit of Acheron,Spider Cavern"
 POLL_SECONDS = max(60, int(os.environ.get("TZ_POLL_SECONDS", "120")))
 STATE_FILE = Path(os.environ.get("TZ_STATE_FILE", HERE / "seen_tz.json"))
 
+# Zona horaria en la que se muestran las horas de los avisos. Tiene que ser
+# la TUYA, no la del servidor que corre el script.
+DISPLAY_TZ = os.environ.get("TZ_DISPLAY_TZ", "America/Santiago")
+
 # Cabeceras de cortesia que pide su documentacion. Vacias por defecto: pon tu
 # correo en el .env si quieres identificarte (la API funciona igual sin ellas).
 HEADERS = {"accept": "application/json"}
@@ -107,9 +111,31 @@ def matches(zone: str) -> list:
     return [w for w in WATCH if re.search(rf"\b{re.escape(w)}\b", z)]
 
 
+def _tzinfo():
+    """Zona horaria para mostrar las horas.
+
+    Ojo: datetime.now().astimezone() usa la zona de la MAQUINA, y el runner de
+    GitHub Actions corre en UTC. Sin fijarla, el aviso decia "20:00" cuando en
+    Chile eran las 16:00. zoneinfo necesita la base IANA, que Linux trae de
+    fabrica y Windows no: por eso tzdata esta en requirements.txt. Si aun asi
+    no resuelve, preferimos una hora en la zona del sistema antes que reventar
+    el aviso entero.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+
+        return ZoneInfo(DISPLAY_TZ)
+    except Exception as exc:
+        log.warning("No pude usar la zona horaria %s (%s); uso la del sistema.", DISPLAY_TZ, exc)
+        return None
+
+
+TZINFO = _tzinfo()
+
+
 def next_hour_local() -> str:
     """Las TZ rotan en punto, asi que la siguiente arranca a la hora siguiente."""
-    ahora = datetime.now().astimezone()
+    ahora = datetime.now(TZINFO) if TZINFO else datetime.now().astimezone()
     return (ahora.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)).strftime(
         "%H:%M"
     )
