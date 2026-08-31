@@ -1,0 +1,3 @@
+requests>=2.31
+# Imita la huella TLS de Chrome. Sin esto, Cloudflare devuelve 403 a todo.
+curl_cffi>=0.7
