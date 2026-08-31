@@ -65,7 +65,13 @@ jobs:
           NOTIFY_CHANNELS: telegram
           WATCH_EVENTS: accepted,incoming
           POLL_SECONDS: "60"
-          COLD_START_HOURS: "2"
+          # El hueco entre un relanzamiento y el siguiente es de segundos, no
+          # de minutos, asi que no hace falta la ventana de 2h que pedia el
+          # cron viejo. Ademas acota el daño: la cache se guarda en el
+          # post-step, o sea DESPUES de relanzar, y si el job nuevo alcanzara
+          # a restaurar estado viejo reenviaria como maximo 15 min de
+          # historial en vez de 2 horas.
+          COLD_START_HOURS: "0.25"
 
       # Si el job murió en menos de 5 minutos algo está roto de verdad
       # (token vencido, dependencias, API caída). Relanzar ahí sería un crash
