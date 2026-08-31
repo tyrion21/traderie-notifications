@@ -1,15 +1,15 @@
 name: Prueba programada
 
 # Manda un mensaje de prueba a Telegram para confirmar que todo funciona con
-# el PC apagado. El cron lleva dia y mes fijos (31 de agosto, 16:31 UTC), asi
-# que dispara una sola vez y no vuelve a molestar.
+# el PC apagado. El cron lleva dia y mes fijos (31 de agosto, 16:11 UTC =
+# 12:11 en Chile), asi que dispara una sola vez y no vuelve a molestar.
 #
 # Cuando te llegue el mensaje, este archivo ya cumplio: puedes borrarlo.
 # El watcher de verdad es traderie.yml, que corre cada 5 minutos.
 
 on:
   schedule:
-    - cron: "31 16 31 8 *"
+    - cron: "11 16 31 8 *"
   workflow_dispatch:
 
 permissions:
