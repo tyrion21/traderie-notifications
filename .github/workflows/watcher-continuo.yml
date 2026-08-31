@@ -1,0 +1,84 @@
+name: Watcher continuo
+
+# Alternativa al cron de GitHub, que en esta repo nunca arrancó: cero corridas
+# programadas en su primera hora de vida, teniendo un */5 configurado. En vez
+# de depender del scheduler, esto corre UN job largo que hace polling cada 60s
+# durante 5h45m y, justo antes de morir, se relanza solo.
+#
+# Bootstrap: dispáralo UNA vez a mano desde la pestaña Actions. De ahí en
+# adelante se sostiene solo y no vuelve a tocar el scheduler.
+#
+# Requiere el secret RELAUNCH_TOKEN: un PAT fine-grained sobre esta repo con
+# permiso "Actions: Read and write". El GITHUB_TOKEN por defecto NO sirve:
+# GitHub ignora los workflow_dispatch hechos con él, justamente para evitar
+# recursiones como esta.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Si un relanzamiento se solapa con el job saliente, que no queden dos
+  # watchers mandando la misma notificación duplicada.
+  group: watcher-continuo
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350 # el techo de GitHub son 6h
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # Mismo esquema que traderie.yml: el estado viaja por la caché entre
+      # relanzamientos. Como el hueco entre uno y otro es de segundos,
+      # COLD_START_HOURS=2 tapa cualquier pérdida sin spamear el historial.
+      - uses: actions/cache@v4
+        with:
+          path: seen_offers.json
+          key: traderie-state-${{ github.run_id }}
+          restore-keys: |
+            traderie-state-
+
+      # `timeout` mata el proceso a las 5h45m, 5 minutos antes del
+      # timeout-minutes del job. Ese margen es lo que deja correr el
+      # relanzamiento: si dejáramos que GitHub cancele el job, el paso
+      # siguiente no correría. El `|| true` evita que el kill marque fallo.
+      - name: Vigilar
+        id: watch
+        run: |
+          echo "inicio=$(date +%s)" >> "$GITHUB_OUTPUT"
+          timeout 20700 python traderie-notifications.py || true
+        env:
+          TRADERIE_AUTH: ${{ secrets.TRADERIE_AUTH }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NOTIFY_CHANNELS: telegram
+          WATCH_EVENTS: accepted,incoming
+          POLL_SECONDS: "60"
+          COLD_START_HOURS: "2"
+
+      # Si el job murió en menos de 5 minutos algo está roto de verdad
+      # (token vencido, dependencias, API caída). Relanzar ahí sería un crash
+      # loop caliente quemando corridas, así que mejor fallar ruidosamente.
+      - name: Relanzar
+        if: always()
+        run: |
+          vivio=$(( $(date +%s) - ${{ steps.watch.outputs.inicio }} ))
+          if [ "$vivio" -lt 300 ]; then
+            echo "El watcher solo duró ${vivio}s. Algo falló; no relanzo." >&2
+            exit 1
+          fi
+          gh workflow run watcher-continuo.yml --ref main
+          echo "Relanzado tras ${vivio}s de vigilancia."
+        env:
+          GH_TOKEN: ${{ secrets.RELAUNCH_TOKEN }}
