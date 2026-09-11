@@ -86,6 +86,10 @@ jobs:
           # a restaurar estado viejo reenviaria como maximo 15 min de
           # historial en vez de 2 horas.
           COLD_START_HOURS: "0.25"
+          # Las Terror Zones rotan cada media hora, asi que los 120s por
+          # defecto se comen hasta un 7% de la ventana antes de avisar. A 60s
+          # el aviso de "ya esta activa" llega mas pegado a la rotacion.
+          TZ_POLL_SECONDS: "60"
           # Las zonas vigiladas viven en TZ_WATCH_DEFAULT, dentro de
           # terror-zones.py. Para cambiarlas edita esa lista (o define TZ_WATCH
           # aca si prefieres tenerlas a la vista en el workflow).
