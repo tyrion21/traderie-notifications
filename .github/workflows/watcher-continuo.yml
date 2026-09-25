@@ -7,7 +7,7 @@ name: Watcher continuo
 # Alternativa al cron de GitHub, que en esta repo nunca arrancó: cero corridas
 # programadas en su primera hora de vida, teniendo un */5 configurado. En vez
 # de depender del scheduler, esto corre UN job largo que hace polling cada 60s
-# durante 5h45m y, justo antes de morir, se relanza solo.
+# durante 5h45m y deja su relevo reservado en la cola desde el arranque.
 #
 # Bootstrap: dispáralo UNA vez a mano desde la pestaña Actions. De ahí en
 # adelante se sostiene solo y no vuelve a tocar el scheduler.
@@ -34,6 +34,27 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 350 # el techo de GitHub son 6h
     steps:
+      # El relevo se reserva AL PRINCIPIO, no al final, y esto es lo que
+      # sostiene la cadena. El run nuevo se dispara ya, se queda esperando por
+      # el `concurrency` de arriba y arranca cuando este job muera, sea como
+      # sea: timeout, fallo, cancelación o runner reclamado por GitHub
+      # ("The hosted runner lost communication with the server"). Ese último
+      # caso es el que rompía la cadena cuando el relanzamiento vivía en el
+      # último paso: el runner se va sin llegar a ejecutarlo y nadie relanza,
+      # así que las notificaciones se apagan en silencio. Pasó el 2026-09-24:
+      # el job murió a las 4h09m y el watcher quedó muerto.
+      #
+      # Va antes del checkout para que la reserva exista incluso si el setup
+      # falla; por eso necesita GH_REPO, que sin repo clonado `gh` no adivina
+      # sobre qué repo trabaja.
+      - name: Reservar relevo
+        run: |
+          gh workflow run watcher-continuo.yml --ref main
+          echo "Relevo en cola; arranca solo cuando este job termine."
+        env:
+          GH_TOKEN: ${{ secrets.RELAUNCH_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
@@ -56,9 +77,10 @@ jobs:
             traderie-state-
 
       # `timeout` mata el proceso a las 5h45m, 5 minutos antes del
-      # timeout-minutes del job. Ese margen es lo que deja correr el
-      # relanzamiento: si dejáramos que GitHub cancele el job, el paso
-      # siguiente no correría. El `|| true` evita que el kill marque fallo.
+      # timeout-minutes del job. Ese margen ya no es crítico para la cadena
+      # (el relevo está reservado desde el primer paso), pero deja que la caché
+      # se guarde en su post-step en vez de morir con el job cancelado.
+      # El `|| true` evita que el kill marque fallo.
       - name: Vigilar
         id: watch
         run: |
@@ -94,18 +116,34 @@ jobs:
           # terror-zones.py. Para cambiarlas edita esa lista (o define TZ_WATCH
           # aca si prefieres tenerlas a la vista en el workflow).
 
-      # Si el job murió en menos de 5 minutos algo está roto de verdad
-      # (token vencido, dependencias, API caída). Relanzar ahí sería un crash
-      # loop caliente quemando corridas, así que mejor fallar ruidosamente.
-      - name: Relanzar
+      # Contrapeso de la reserva. Si la vigilancia duró menos de 5 minutos algo
+      # está roto de verdad (token vencido, dependencias, API caída) y el relevo
+      # ya en cola convertiría la cadena en un crash loop caliente quemando
+      # corridas. En ese caso lo cancelamos y fallamos ruidosamente.
+      # INICIO vacío = el paso de vigilancia no llegó ni a arrancar, que también
+      # cuenta como roto.
+      - name: Abortar relevo si algo se rompió
         if: always()
-        run: |
-          vivio=$(( $(date +%s) - ${{ steps.watch.outputs.inicio }} ))
-          if [ "$vivio" -lt 300 ]; then
-            echo "El watcher solo duró ${vivio}s. Algo falló; no relanzo." >&2
-            exit 1
-          fi
-          gh workflow run watcher-continuo.yml --ref main
-          echo "Relanzado tras ${vivio}s de vigilancia."
         env:
           GH_TOKEN: ${{ secrets.RELAUNCH_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          INICIO: ${{ steps.watch.outputs.inicio }}
+        run: |
+          if [ -n "$INICIO" ]; then
+            vivio=$(( $(date +%s) - INICIO ))
+          else
+            vivio=0
+          fi
+          if [ "$vivio" -ge 300 ]; then
+            echo "Vigilancia de ${vivio}s. El relevo en cola sigue su curso."
+            exit 0
+          fi
+          echo "El watcher solo duró ${vivio}s. Cancelo el relevo para no entrar en crash loop." >&2
+          for id in $(gh run list --workflow watcher-continuo.yml --limit 20 \
+                        --json databaseId,status \
+                        --jq '.[] | select(.status == "queued" or .status == "pending" or .status == "waiting") | .databaseId'); do
+            if [ "$id" != "$GITHUB_RUN_ID" ]; then
+              gh run cancel "$id" && echo "Relevo $id cancelado." || echo "No pude cancelar $id." >&2
+            fi
+          done
+          exit 1

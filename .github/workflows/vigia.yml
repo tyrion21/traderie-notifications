@@ -1,0 +1,45 @@
+name: Vigia del watcher
+
+# Red de seguridad de watcher-continuo.yml, no su defensa principal.
+#
+# Ese workflow se sostiene solo dejando su relevo reservado en la cola desde el
+# arranque, así que ni un runner reclamado a media corrida corta la cadena. Pero
+# si el relevo en cola también se pierde (alguien lo cancela a mano, GitHub lo
+# descarta, el token del relevo caduca) la cadena se corta y las notificaciones
+# se apagan en silencio hasta que alguien lo note horas después. Esto revisa
+# cada media hora si queda algún watcher vivo y, si no, lo revive.
+#
+# OJO: el cron de GitHub nunca arrancó en esta repo la primera vez que se
+# intentó, y de ahí viene todo el diseño de cadena. Si no corre, no perdemos
+# nada respecto a hoy; si corre, tapa el agujero en <=30 min.
+#
+# Usa el mismo secret RELAUNCH_TOKEN: el GITHUB_TOKEN por defecto no puede
+# disparar workflow_dispatch (GitHub ignora esos eventos para evitar recursión).
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  revivir:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Revivir el watcher si no queda ninguno vivo
+        env:
+          GH_TOKEN: ${{ secrets.RELAUNCH_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          vivos=$(gh run list --workflow watcher-continuo.yml --limit 20 \
+                    --json status \
+                    --jq '[.[] | select(.status == "in_progress" or .status == "queued" or .status == "pending" or .status == "waiting")] | length')
+          if [ "$vivos" -gt 0 ]; then
+            echo "Hay ${vivos} corrida(s) viva(s) de watcher-continuo; no toco nada."
+            exit 0
+          fi
+          echo "Ningún watcher vivo ni en cola. Lo relanzo."
+          gh workflow run watcher-continuo.yml --ref main
